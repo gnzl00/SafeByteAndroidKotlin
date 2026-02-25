@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "815817091542",
+    "project_id": "fooddna-b91c1",
+    "storage_bucket": "fooddna-b91c1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:815817091542:android:e0c3f4f101a35e0e429c77",
+        "android_client_info": {
+          "package_name": "com.safebyte"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClAo-DAiWL_L9IyQvhfPxkjEPYs0MJoqI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

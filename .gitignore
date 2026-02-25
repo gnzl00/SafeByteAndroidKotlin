@@ -1,0 +1,25 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+.idea/
+build/
+*.iml
+local.properties
+.gradle/
+#----------------
+# Gradle y archivos temporales
+.gradle*/
+build/
+captures/
+.externalNativeBuild
+.cxx/
+
+# Configuración de IDE
+.idea/
+*.iml
+
+# Archivos locales con datos sensibles
+local.properties
+
+# Otros
+.DS_Store
