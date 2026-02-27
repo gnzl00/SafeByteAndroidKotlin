@@ -1,6 +1,7 @@
 package com.safebyte
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,6 +13,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 interface IANutriApi {
@@ -109,8 +111,13 @@ data class IANutriCookingAssistantResponse(
 
 @Serializable
 data class IANutriHistoryEnvelope(
-    val history: List<IANutriHistoryItem> = emptyList()
-)
+    val history: List<IANutriHistoryItem> = emptyList(),
+    @SerialName("History")
+    val historyPascal: List<IANutriHistoryItem> = emptyList()
+) {
+    val resolvedHistory: List<IANutriHistoryItem>
+        get() = if (history.isNotEmpty()) history else historyPascal
+}
 
 @Serializable
 data class IANutriHistoryItem(
@@ -131,11 +138,21 @@ data class IANutriHistoryItem(
 @Serializable
 data class IANutriDeleteHistoryResponse(
     val message: String = "",
-    val deleted: Int = 0
-)
+    val deleted: Int = 0,
+    @SerialName("Message")
+    val messagePascal: String = "",
+    @SerialName("Deleted")
+    val deletedPascal: Int = 0
+) {
+    val resolvedMessage: String
+        get() = message.ifBlank { messagePascal }
+    val resolvedDeleted: Int
+        get() = if (deleted != 0) deleted else deletedPascal
+}
 
 object IANutriNetwork {
     private val json = Json { ignoreUnknownKeys = true }
+    private val cache = ConcurrentHashMap<String, IANutriApi>()
 
     private val client: OkHttpClient by lazy {
         val logger = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
@@ -147,13 +164,30 @@ object IANutriNetwork {
             .build()
     }
 
-    val api: IANutriApi by lazy {
+    private fun buildApi(baseUrl: String): IANutriApi {
         val contentType = "application/json".toMediaType()
-        Retrofit.Builder()
-            .baseUrl(BuildConfig.SAFEBYTE_API_BASE_URL)
+        return Retrofit.Builder()
+            .baseUrl(baseUrl)
             .client(client)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
             .create(IANutriApi::class.java)
+    }
+
+    fun apiFor(baseUrl: String): IANutriApi {
+        val normalized = normalizeBaseUrl(baseUrl)
+        return cache.getOrPut(normalized) { buildApi(normalized) }
+    }
+
+    private fun normalizeBaseUrl(value: String): String {
+        val trimmed = value.trim().ifBlank { BuildConfig.SAFEBYTE_API_BASE_URL }.trim()
+        val noTrailingSlash = trimmed.trimEnd('/')
+        val cleaned = if (noTrailingSlash.lowercase().endsWith("/api")) {
+            noTrailingSlash.dropLast(4)
+        } else {
+            noTrailingSlash
+        }
+        val finalBase = cleaned.ifBlank { BuildConfig.SAFEBYTE_API_BASE_URL.trimEnd('/') }
+        return if (finalBase.endsWith("/")) finalBase else "$finalBase/"
     }
 }

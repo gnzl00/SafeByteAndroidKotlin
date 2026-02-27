@@ -1,6 +1,7 @@
 package com.safebyte.data
 
 import com.google.firebase.firestore.FirebaseFirestore
+import com.safebyte.normalizeAllergenSet
 import kotlinx.coroutines.tasks.await
 
 class FirebaseUsersRepo(
@@ -9,12 +10,13 @@ class FirebaseUsersRepo(
     suspend fun getAllergensByEmail(emailLower: String): Set<String> {
         val doc = db.collection("users").document(emailLower).get().await()
         val list = doc.get("allergens") as? List<*> ?: emptyList<Any>()
-        return list.mapNotNull { it as? String }.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        return normalizeAllergenSet(list.mapNotNull { it as? String })
     }
 
     suspend fun setAllergensByEmail(emailLower: String, allergens: Set<String>) {
+        val normalized = normalizeAllergenSet(allergens)
         db.collection("users").document(emailLower)
-            .update("allergens", allergens.toList())
+            .update("allergens", normalized.toList())
             .await()
     }
 }

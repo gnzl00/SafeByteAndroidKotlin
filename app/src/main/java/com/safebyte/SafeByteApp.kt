@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import com.safebyte.data.FirebaseUsersRepo
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 sealed class Dest(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -29,6 +30,7 @@ sealed class Dest(val route: String, val label: String, val icon: androidx.compo
     data object Contact : Dest("contact", "Contacto", Icons.Filled.Mail)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SafeByteApp() {
     val navController = rememberNavController()
@@ -45,18 +47,19 @@ fun SafeByteApp() {
 
     // Cargar alérgenos desde Firestore cuando hay sesión (excepto guest)
     LaunchedEffect(isLoggedIn, loggedEmail) {
+        val cachedLocal = prefs.allergens.first()
         if (isLoggedIn && loggedEmail.isNotBlank() && loggedEmail != "guest@local") {
             allergensLoaded = false
             try {
                 userAllergens = usersRepo.getAllergensByEmail(loggedEmail)
                 prefs.setAllergens(userAllergens) // cache local opcional
             } catch (_: Throwable) {
-                userAllergens = emptySet()
+                userAllergens = normalizeAllergenSet(cachedLocal)
             } finally {
                 allergensLoaded = true
             }
         } else {
-            userAllergens = emptySet()
+            userAllergens = normalizeAllergenSet(cachedLocal)
             allergensLoaded = true
         }
     }
@@ -83,8 +86,27 @@ fun SafeByteApp() {
     val items = listOf(Dest.Home, Dest.Meals, Dest.IANutri, Dest.Scanner, Dest.Settings, Dest.Contact)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val currentTitle = when (currentRoute) {
+        Dest.Home.route -> "Home"
+        Dest.Meals.route -> "Comidas"
+        Dest.IANutri.route -> "IANutri"
+        Dest.Scanner.route -> "Scanner"
+        Dest.Settings.route -> "Configuracion de Usuario"
+        Dest.Contact.route -> "Contacta con Nosotros"
+        else -> "SafeByte"
+    }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(currentTitle) },
+                actions = {
+                    TextButton(onClick = { scope.launch { prefs.logout() } }) {
+                        Text("Cerrar sesion")
+                    }
+                }
+            )
+        },
         bottomBar = {
             NavigationBar {
                 items.forEach { dest ->
@@ -110,27 +132,31 @@ fun SafeByteApp() {
             modifier = Modifier.padding(paddingValues)
         ) {
             composable(Dest.Home.route) {
-                HomeScreen(onLogout = { scope.launch { prefs.logout() } })
+                HomeScreen()
             }
             composable(Dest.Meals.route) { MealsScreen(prefs = prefs) }
             composable(Dest.IANutri.route) {
                 IANutriScreen(
                     email = loggedEmail,
-                    allergens = userAllergens
+                    allergens = userAllergens,
+                    apiBaseUrl = BuildConfig.SAFEBYTE_API_BASE_URL
                 )
             }
             composable(Dest.Scanner.route) { ScannerScreen(prefs = prefs, userAllergens = userAllergens) }
             composable(Dest.Settings.route) {
                 SettingsScreen(
-                    prefs = prefs,
                     emailLower = loggedEmail,
                     currentAllergens = userAllergens,
                     onAllergensChanged = { newSet ->
-                        userAllergens = newSet
+                        userAllergens = normalizeAllergenSet(newSet)
                         scope.launch {
-                            prefs.setAllergens(newSet)
-                            if (loggedEmail.isNotBlank() && loggedEmail != "guest@local") {
-                                usersRepo.setAllergensByEmail(loggedEmail, newSet)
+                            try {
+                                prefs.setAllergens(userAllergens)
+                                if (loggedEmail.isNotBlank() && loggedEmail != "guest@local") {
+                                    usersRepo.setAllergensByEmail(loggedEmail, userAllergens)
+                                }
+                            } catch (_: Throwable) {
+                                // Evita que una falla de red/capa remota cierre la app.
                             }
                         }
                     }

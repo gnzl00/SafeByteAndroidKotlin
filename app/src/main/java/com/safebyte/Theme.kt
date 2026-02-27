@@ -1,11 +1,9 @@
 package com.safebyte
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -29,19 +27,6 @@ private val LightColors = lightColorScheme(
     surface = Color(0xFFF7FBF8),
     onSurface = Color(0xFF234631),
     error = Color(0xFF973333)
-)
-
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFF8DBD9A),
-    onPrimary = Color(0xFF0F2919),
-    primaryContainer = Color(0xFF1B3D2A),
-    onPrimaryContainer = Color(0xFFDDEEE1),
-    secondary = Color(0xFFB8C9BF),
-    background = Color(0xFF101715),
-    onBackground = Color(0xFFE2ECE6),
-    surface = Color(0xFF17211D),
-    onSurface = Color(0xFFE2ECE6),
-    error = Color(0xFFFFB4AB)
 )
 
 private val SafeByteTypography = Typography(
@@ -119,7 +104,7 @@ fun SafeByteTheme(content: @Composable () -> Unit) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
     }
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        colorScheme = LightColors,
         typography = SafeByteTypography,
         shapes = SafeByteShapes,
         content = content

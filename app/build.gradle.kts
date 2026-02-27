@@ -1,3 +1,6 @@
+import java.io.ByteArrayOutputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,9 +9,75 @@ plugins {
 }
 
 val safeByteApiBaseUrl = ((project.findProperty("SAFEBYTE_API_BASE_URL") as? String)
-    ?: "http://10.0.2.2:5188/")
+    ?: "http://127.0.0.1:5188/")
     .trim()
     .let { if (it.endsWith("/")) it else "$it/" }
+
+fun resolveAndroidSdkDir(): String? {
+    val fromEnv = System.getenv("ANDROID_SDK_ROOT")
+        ?: System.getenv("ANDROID_HOME")
+    if (!fromEnv.isNullOrBlank()) return fromEnv
+
+    val localProps = rootProject.file("local.properties")
+    if (!localProps.exists()) return null
+
+    val props = Properties()
+    localProps.inputStream().use { props.load(it) }
+    return props.getProperty("sdk.dir")
+}
+
+val setupAdbReverse by tasks.registering {
+    group = "safebyte"
+    description = "Configura adb reverse tcp:5188 tcp:5188 automaticamente antes de debug."
+
+    doLast {
+        val sdkDir = resolveAndroidSdkDir()
+        if (sdkDir.isNullOrBlank()) {
+            logger.lifecycle("[setupAdbReverse] SDK no encontrado, se omite.")
+            return@doLast
+        }
+
+        val adbName = if (System.getProperty("os.name").lowercase().contains("win")) "adb.exe" else "adb"
+        val adb = file("$sdkDir/platform-tools/$adbName")
+        if (!adb.exists()) {
+            logger.lifecycle("[setupAdbReverse] adb no encontrado en ${adb.absolutePath}, se omite.")
+            return@doLast
+        }
+
+        exec {
+            commandLine(adb.absolutePath, "start-server")
+            isIgnoreExitValue = true
+        }
+
+        val devicesOutput = ByteArrayOutputStream()
+        exec {
+            commandLine(adb.absolutePath, "devices")
+            standardOutput = devicesOutput
+            isIgnoreExitValue = true
+        }
+        val hasDevice = devicesOutput
+            .toString()
+            .lineSequence()
+            .map { it.trim() }
+            .any { line -> Regex("^[^\\s]+\\s+device$").matches(line) }
+
+        if (!hasDevice) {
+            logger.lifecycle("[setupAdbReverse] No hay dispositivo conectado; se omite reverse.")
+            return@doLast
+        }
+
+        val reverseResult = exec {
+            commandLine(adb.absolutePath, "reverse", "tcp:5188", "tcp:5188")
+            isIgnoreExitValue = true
+        }
+
+        if (reverseResult.exitValue == 0) {
+            logger.lifecycle("[setupAdbReverse] OK: tcp:5188 -> tcp:5188")
+        } else {
+            logger.lifecycle("[setupAdbReverse] Fallo adb reverse, continuando build.")
+        }
+    }
+}
 
 android {
     namespace = "com.safebyte"
@@ -58,6 +127,10 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+tasks.matching { it.name == "preDebugBuild" }.configureEach {
+    dependsOn(setupAdbReverse)
 }
 
 dependencies {

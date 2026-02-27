@@ -1,37 +1,66 @@
-# SafeByte (Android - Kotlin)
+# SafeByte Android (Kotlin + Compose)
 
-Esta carpeta contiene la app Android de SafeByte/Food DNA.
+Aplicacion movil de SafeByte/Food DNA.
 
-## Incluido
-- Login / Sign up (Firebase + DataStore para sesion local).
+## Modulos incluidos
+- Login y Sign up (Firestore + DataStore para sesion local).
 - Home.
-- Comidas con filtro por alergenos.
-- IANutri conectado a `api/IANutri`:
-  - `Reformulate`
-  - `GenerateSuggestions`
-  - `CookingAssistant`
-  - `History` (listar y borrar)
-- Configuracion de alergenos.
-- Scanner de codigo de barras con CameraX + ML Kit + Open Food Facts.
+- Comidas con filtros por alergenos.
+- IANutri:
+  - `POST /api/IANutri/Reformulate`
+  - `POST /api/IANutri/GenerateSuggestions`
+  - `POST /api/IANutri/CookingAssistant`
+  - `GET/DELETE /api/IANutri/History`
+- Configuracion de usuario:
+  - alergenos
+- Contacto.
+- Scanner de codigo de barras (CameraX + ML Kit + Open Food Facts).
 
-## Abrir en Android Studio
-1. Android Studio -> Open -> carpeta `SafeByteAndroidKotlin`.
-2. Espera sync de Gradle (JDK 17).
-3. Ejecuta en emulador o dispositivo (API 26+).
+## Estado actual (correcciones aplicadas)
+- Contraste corregido en Login, SignUp, Home, IANutri y Contacto.
+- Pantalla Config estabilizada (evita cierres por layout/guardado remoto).
+- Historial de IANutri robustecido para variantes de respuesta JSON (`history` y `History`).
+- Mensajes de error de IANutri mejorados con pista de URL backend.
+- Eliminados drawables duplicados `_copy` para bajar peso del proyecto y mejorar fluidez.
+
+## Requisitos
+- Android Studio con JDK 17.
+- `minSdk 26`, `targetSdk 34`.
+
+## Ejecucion
+1. Abrir esta carpeta en Android Studio.
+2. Sincronizar Gradle.
+3. Ejecutar en emulador o dispositivo.
 
 ## URL backend IANutri
-La app usa `BuildConfig.SAFEBYTE_API_BASE_URL`.
-
-Valor por defecto:
+Por defecto se usa:
 
 ```text
-http://10.0.2.2:5188/
+http://127.0.0.1:5188/
 ```
 
-Ese valor funciona para emulador Android cuando tu backend ASP.NET corre en `localhost:5188`.
+Notas:
+- La app ya no permite cambiar la URL desde `Config`.
+- Se usa el backend MVC de SafeByte via `BuildConfig.SAFEBYTE_API_BASE_URL`.
+- En movil fisico conectado por Android Studio, usa `adb reverse`:
 
-Para cambiarlo, agrega en `gradle.properties`:
+```powershell
+adb reverse tcp:5188 tcp:5188
+```
+
+- O ejecuta el script del proyecto:
+
+```powershell
+.\scripts\setup-adb-reverse.ps1
+```
+
+- Para despliegue real, define una URL publica del backend en `gradle.properties`.
+
+Tambien puedes fijar el valor por build en `gradle.properties`:
 
 ```properties
 SAFEBYTE_API_BASE_URL=http://TU_HOST_O_IP:PUERTO/
 ```
+
+## Documentacion extra
+- Ver [docs/android-troubleshooting.md](docs/android-troubleshooting.md)

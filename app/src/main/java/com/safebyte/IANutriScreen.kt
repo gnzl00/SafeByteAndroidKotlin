@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import java.io.IOException
+import java.net.URI
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
@@ -105,6 +106,17 @@ private fun sanitizeReformulation(text: String): String {
         .trim()
 }
 
+private fun sanitizeReformulationSafe(text: String): String {
+    val blocked = listOf("modelo", "gpt", "openai", "enfoque:", "notas:")
+    return text.replace("\r", "\n")
+        .split('\n')
+        .map { line -> line.trim().replace(Regex("^[-*\\u2022]\\s*"), "").trim() }
+        .filter { it.isNotBlank() }
+        .filter { line -> blocked.none { token -> line.lowercase().contains(token) } }
+        .joinToString(" ")
+        .trim()
+}
+
 private fun List<String>.normalizeTextList(limit: Int, fallback: List<String> = emptyList()): List<String> {
     val values = linkedSetOf<String>()
     for (value in this) {
@@ -139,14 +151,16 @@ private fun formatHistoryDate(value: String?): String {
     }
 }
 
-private fun Throwable.toApiMessage(): String {
+private fun Throwable.toApiMessage(apiBaseUrl: String): String {
     if (this is HttpException) {
         val body = try { response()?.errorBody()?.string().orEmpty() } catch (_: Throwable) { "" }
         val parsed = extractApiErrorMessage(body)
         if (parsed.isNotBlank()) return parsed
         return "Error ${code()} en la API IANutri."
     }
-    if (this is IOException) return "No se pudo conectar al backend IANutri."
+    if (this is IOException) {
+        return "No se pudo conectar al backend IANutri.${buildBackendHint(apiBaseUrl)}"
+    }
     return message?.trim().takeUnless { it.isNullOrBlank() } ?: "Error inesperado."
 }
 
@@ -158,14 +172,30 @@ private fun extractApiErrorMessage(body: String): String {
     return body.trim().replace("\n", " ").take(220)
 }
 
+private fun buildBackendHint(apiBaseUrl: String): String {
+    val raw = apiBaseUrl.trim().ifBlank { BuildConfig.SAFEBYTE_API_BASE_URL }.trim()
+    val normalized = if (raw.endsWith("/")) raw else "$raw/"
+    val host = runCatching { URI(normalized).host?.lowercase().orEmpty() }.getOrDefault("")
+    return when {
+        host.isBlank() -> " Revisa SAFEBYTE_API_BASE_URL en el build."
+        host == "localhost" || host == "127.0.0.1" ->
+            " URL actual: $normalized Si pruebas en movil por Android Studio, ejecuta: adb reverse tcp:5188 tcp:5188."
+        host == "10.0.2.2" ->
+            " URL actual: $normalized Esta direccion solo aplica al emulador Android."
+        else -> " URL actual: $normalized"
+    }
+}
+
 @Composable
 fun IANutriScreen(
     email: String,
-    allergens: Set<String>
+    allergens: Set<String>,
+    apiBaseUrl: String
 ) {
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
-    val normalizedAllergens = remember(allergens) { allergens.map { it.trim() }.filter { it.isNotEmpty() }.sorted() }
+    val normalizedAllergens = remember(allergens) { normalizeAllergenSet(allergens).toList().sorted() }
+    val api = remember(apiBaseUrl) { IANutriNetwork.apiFor(apiBaseUrl) }
     val apiEmail = remember(email) {
         val e = email.trim().lowercase()
         if (e.isBlank() || e == "guest@local") "" else e
@@ -211,12 +241,12 @@ fun IANutriScreen(
         }
         loadingHistory = true
         try {
-            history = withContext(Dispatchers.IO) { IANutriNetwork.api.getHistory(apiEmail).history }
+            history = withContext(Dispatchers.IO) { api.getHistory(apiEmail).resolvedHistory }
             historyStatus = UiStatus()
         } catch (t: Throwable) {
             history = emptyList()
             if (showError) {
-                historyStatus = UiStatus("No se pudo cargar historial: ${t.toApiMessage()}", StatusKind.ERROR)
+                historyStatus = UiStatus("No se pudo cargar historial: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
             }
         } finally {
             loadingHistory = false
@@ -238,7 +268,7 @@ fun IANutriScreen(
         if (showLoadingText) plannerStatus = UiStatus("Reformulando peticion...", StatusKind.INFO)
         return try {
             val response = withContext(Dispatchers.IO) {
-                IANutriNetwork.api.reformulate(
+                api.reformulate(
                     IANutriReformulateRequest(
                         email = apiEmail,
                         userInput = trimmedInput,
@@ -247,7 +277,7 @@ fun IANutriScreen(
                     )
                 )
             }
-            reformulatedPrompt = sanitizeReformulation(response.reformulatedPrompt)
+            reformulatedPrompt = sanitizeReformulationSafe(response.reformulatedPrompt)
             notes = response.notes.normalizeTextList(5)
             if (reformulatedPrompt.isBlank()) {
                 plannerStatus = UiStatus("No se pudo reformular la peticion.", StatusKind.ERROR)
@@ -259,7 +289,7 @@ fun IANutriScreen(
         } catch (t: Throwable) {
             reformulatedPrompt = ""
             notes = emptyList()
-            plannerStatus = UiStatus("Error al reformular: ${t.toApiMessage()}", StatusKind.ERROR)
+            plannerStatus = UiStatus("Error al reformular: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
             false
         } finally {
             reformulating = false
@@ -284,7 +314,7 @@ fun IANutriScreen(
         resultStatus = UiStatus("Generando sugerencias...", StatusKind.INFO)
         try {
             val response = withContext(Dispatchers.IO) {
-                IANutriNetwork.api.generateSuggestions(
+                api.generateSuggestions(
                     IANutriGenerateSuggestionsRequest(
                         email = apiEmail,
                         userInput = input.trim(),
@@ -307,7 +337,7 @@ fun IANutriScreen(
                 UiStatus("Pulsa una sugerencia para abrir el asistente de cocina.", StatusKind.SUCCESS)
             }
         } catch (t: Throwable) {
-            resultStatus = UiStatus("No se pudieron generar sugerencias: ${t.toApiMessage()}", StatusKind.ERROR)
+            resultStatus = UiStatus("No se pudieron generar sugerencias: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
         } finally {
             generating = false
         }
@@ -323,7 +353,7 @@ fun IANutriScreen(
         assistantStatus = UiStatus("Generando asistente de cocina...", StatusKind.INFO)
         try {
             val response = withContext(Dispatchers.IO) {
-                IANutriNetwork.api.cookingAssistant(
+                api.cookingAssistant(
                     IANutriCookingAssistantRequest(
                         email = apiEmail,
                         allergens = normalizedAllergens,
@@ -347,7 +377,7 @@ fun IANutriScreen(
             assistantSafety = listOf(
                 "Confirma etiquetas y evita trazas de: ${normalizedAllergens.joinToString().ifBlank { "sin alergenos configurados" }}."
             )
-            assistantStatus = UiStatus("No se pudo generar guia IA: ${t.toApiMessage()}", StatusKind.ERROR)
+            assistantStatus = UiStatus("No se pudo generar guia IA: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
         } finally {
             loadingAssistant = false
         }
@@ -357,7 +387,7 @@ fun IANutriScreen(
         activeHistoryId = item.id
         selectedMode = modeFromLabel(item.option)
         input = item.userInput
-        reformulatedPrompt = sanitizeReformulation(item.reformulatedPrompt)
+        reformulatedPrompt = sanitizeReformulationSafe(item.reformulatedPrompt)
         notes = emptyList()
         summary = item.summary
         warnings = item.globalWarnings.normalizeTextList(8)
@@ -405,7 +435,11 @@ fun IANutriScreen(
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFFE7ECE8)),
                                     shape = RoundedCornerShape(999.dp)
                                 ) {
-                                    Text(value, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                                    Text(
+                                        value,
+                                        color = Color(0xFF2D4A39),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
                                 }
                             }
                         }
@@ -433,6 +467,11 @@ fun IANutriScreen(
                         modifier = Modifier.fillMaxWidth().height(148.dp),
                         placeholder = { Text("Ej: Tengo pollo, arroz y verduras. Quiero algo rapido.") },
                         colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF1E2E23),
+                            unfocusedTextColor = Color(0xFF1E2E23),
+                            focusedPlaceholderColor = Color(0xFF5C6A63),
+                            unfocusedPlaceholderColor = Color(0xFF5C6A63),
+                            cursorColor = IaPrimary,
                             focusedContainerColor = Color(0xFFFDFEFE),
                             unfocusedContainerColor = Color(0xFFFDFEFE),
                             focusedBorderColor = IaPrimary,
@@ -614,12 +653,12 @@ fun IANutriScreen(
                                         clearingHistory = true
                                         historyStatus = UiStatus("Borrando historial...", StatusKind.INFO)
                                         try {
-                                            withContext(Dispatchers.IO) { IANutriNetwork.api.deleteHistory(apiEmail) }
+                                            withContext(Dispatchers.IO) { api.deleteHistory(apiEmail) }
                                             history = emptyList()
                                             activeHistoryId = ""
                                             historyStatus = UiStatus("Historial eliminado correctamente.", StatusKind.SUCCESS)
                                         } catch (t: Throwable) {
-                                            historyStatus = UiStatus("No se pudo borrar historial: ${t.toApiMessage()}", StatusKind.ERROR)
+                                            historyStatus = UiStatus("No se pudo borrar historial: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
                                         } finally {
                                             clearingHistory = false
                                         }

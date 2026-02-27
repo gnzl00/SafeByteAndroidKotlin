@@ -1,6 +1,7 @@
 package com.safebyte
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,16 +12,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -33,7 +33,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -42,92 +46,97 @@ data class FoodItem(
     val imageResName: String,
     val ingredients: String,
     val recipe: String,
-    val allergens: List<String>,
+    val allergens: List<String>
 )
 
 @Composable
 fun MealsScreen(prefs: UserPrefs) {
     val selectedAllergens by prefs.allergens.collectAsState(initial = emptySet())
+    val meals = remember { MealsData.meals }
     var query by remember { mutableStateOf("") }
-    var hideUnsafe by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<FoodItem?>(null) }
 
-    val meals = remember { MealsData.meals }
-
-    val filtered = remember(query, hideUnsafe, selectedAllergens) {
+    val filteredMeals = remember(query, selectedAllergens) {
+        val normalizedUserAllergens = normalizeAllergenSet(selectedAllergens)
         meals.asSequence()
             .filter { it.name.contains(query, ignoreCase = true) }
-            .filter { item ->
-                if (!hideUnsafe) true
-                else item.allergens.none { it in selectedAllergens }
-            }
+            .filter { item -> !hasAllergenConflict(item.allergens, normalizedUserAllergens) }
             .toList()
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFFD0F2D1), Color(0xFFF0F9F4))
+                )
+            )
+            .padding(14.dp)
+    ) {
         Text(
-            "Comidas recomendadas",
+            "Comidas Recomendadas",
             style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.primary
+            color = Color(0xFF1E5631),
+            fontWeight = FontWeight.Bold
         )
-        Spacer(Modifier.height(12.dp))
 
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("Buscar comidas...") },
+            placeholder = { Text("Buscar comidas...") },
             modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(25.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                focusedLabelColor = MaterialTheme.colorScheme.primary,
-                cursorColor = MaterialTheme.colorScheme.primary
+                focusedTextColor = Color(0xFF1F1F1F),
+                unfocusedTextColor = Color(0xFF1F1F1F),
+                focusedPlaceholderColor = Color(0xFF60796A),
+                unfocusedPlaceholderColor = Color(0xFF60796A),
+                cursorColor = Color(0xFF1E5631),
+                focusedBorderColor = Color(0xFF1E5631),
+                unfocusedBorderColor = Color(0xFFCCCCCC),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White
             )
         )
 
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = hideUnsafe,
-                onClick = { hideUnsafe = !hideUnsafe },
-                label = { Text("Ocultar con mis alergenos") },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-            if (selectedAllergens.isEmpty()) {
-                AssistChip(
-                    onClick = { /* no-op */ },
-                    label = { Text("Configura alergenos para filtrar") },
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        labelColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+        Text(
+            "Resultados: ${filteredMeals.size}",
+            color = Color(0xFF4D4D4D)
+        )
+
+        Spacer(Modifier.height(8.dp))
+        if (filteredMeals.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    "No hay comidas visibles con los filtros actuales.",
+                    color = Color(0xFF444444)
                 )
             }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Resultados: ${filtered.size}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.secondary
-        )
-
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(filtered) { item ->
-                MealRow(item = item, onClick = { selected = item })
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(220.dp),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(filteredMeals) { item ->
+                    MealCard(item = item, onClick = { selected = item })
+                }
             }
         }
     }
 
-    if (selected != null) {
-        MealDetailDialog(
-            item = selected!!,
+    selected?.let { item ->
+        MealModal(
+            item = item,
             selectedAllergens = selectedAllergens,
             onDismiss = { selected = null }
         )
@@ -135,51 +144,50 @@ fun MealsScreen(prefs: UserPrefs) {
 }
 
 @Composable
-private fun MealRow(item: FoodItem, onClick: () -> Unit) {
+private fun MealCard(item: FoodItem, onClick: () -> Unit) {
     val resId = drawableId(item.imageResName)
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Row(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (resId != 0) {
                 Image(
                     painter = painterResource(resId),
                     contentDescription = item.name,
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentScale = ContentScale.Crop
                 )
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    item.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Alergenos: " + (if (item.allergens.isEmpty()) "Ninguno" else item.allergens.joinToString()),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
+            Text(
+                text = item.name,
+                color = Color(0xFF1E5631),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
 @Composable
-private fun MealDetailDialog(item: FoodItem, selectedAllergens: Set<String>, onDismiss: () -> Unit) {
-    val unsafe = item.allergens.any { it in selectedAllergens } && selectedAllergens.isNotEmpty()
+private fun MealModal(
+    item: FoodItem,
+    selectedAllergens: Set<String>,
+    onDismiss: () -> Unit
+) {
+    val normalizedUserKeys = normalizeAllergenSet(selectedAllergens).map { allergenKey(it) }.toSet()
+    val conflicts = item.allergens.filter { allergenKey(it) in normalizedUserKeys }
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cerrar") }
-        },
-        title = { Text(item.name) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
+        title = { Text(item.name, color = Color(0xFF1E5631), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val resId = drawableId(item.imageResName)
@@ -189,19 +197,20 @@ private fun MealDetailDialog(item: FoodItem, selectedAllergens: Set<String>, onD
                         contentDescription = item.name,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(180.dp)
-                    )
-                }
-                if (unsafe) {
-                    Text(
-                        "Contiene alergenos marcados por ti: " +
-                            item.allergens.filter { it in selectedAllergens }.joinToString(),
-                        color = MaterialTheme.colorScheme.error
+                            .height(180.dp),
+                        contentScale = ContentScale.Crop
                     )
                 }
                 Text("Ingredientes: ${item.ingredients}")
-                Text("Receta:")
-                Text("Alergenos: " + (if (item.allergens.isEmpty()) "Ninguno" else item.allergens.joinToString()))
+                Text("Receta: ${item.recipe}")
+                Text("Alergenos: ${if (item.allergens.isEmpty()) "Ninguno" else item.allergens.joinToString()}")
+                if (conflicts.isNotEmpty()) {
+                    Text(
+                        "Aviso: contiene alergenos seleccionados por ti (${conflicts.joinToString()}).",
+                        color = Color(0xFF973333),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     )

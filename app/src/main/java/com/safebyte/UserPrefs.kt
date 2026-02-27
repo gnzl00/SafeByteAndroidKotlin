@@ -1,7 +1,6 @@
 package com.safebyte
 
 import android.content.Context
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -25,7 +24,9 @@ class UserPrefs(private val context: Context) {
         context.dataStore.data.map { prefs -> prefs[KEY_EMAIL] ?: "" }
 
     val allergens: Flow<Set<String>> =
-        context.dataStore.data.map { prefs -> prefs[KEY_ALLERGENS] ?: emptySet() }
+        context.dataStore.data.map { prefs ->
+            normalizeAllergenSet(prefs[KEY_ALLERGENS] ?: emptySet())
+        }
 
     /** Guarda sesión (log in) con email */
     suspend fun setLoggedIn(email: String) {
@@ -45,7 +46,7 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setAllergens(values: Set<String>) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_ALLERGENS] = values
+            prefs[KEY_ALLERGENS] = normalizeAllergenSet(values)
         }
     }
 }
