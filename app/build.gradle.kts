@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream
+import java.net.URI
 import java.util.Properties
 
 plugins {
@@ -8,10 +9,30 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-val safeByteApiBaseUrl = ((project.findProperty("SAFEBYTE_API_BASE_URL") as? String)
+val safeByteApiBaseUrlInput = ((project.findProperty("SAFEBYTE_API_BASE_URL") as? String)
+    ?: System.getenv("SAFEBYTE_API_BASE_URL")
     ?: "http://127.0.0.1:5188/")
     .trim()
+
+val safeByteApiBaseUrl = safeByteApiBaseUrlInput
     .let { if (it.endsWith("/")) it else "$it/" }
+
+fun backendHost(baseUrl: String): String =
+    runCatching { URI(baseUrl).host?.lowercase().orEmpty() }.getOrDefault("")
+
+fun isLocalBackend(baseUrl: String): Boolean {
+    val host = backendHost(baseUrl)
+    return host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
+}
+
+val isLocalBackendUrl = isLocalBackend(safeByteApiBaseUrl)
+val requestedTasks = gradle.startParameter.taskNames.joinToString(" ").lowercase()
+val isReleaseTaskRequested = requestedTasks.contains("release") || requestedTasks.contains("bundle")
+if (isReleaseTaskRequested && isLocalBackendUrl) {
+    throw GradleException(
+        "SAFEBYTE_API_BASE_URL apunta a $safeByteApiBaseUrl. Para builds release usa una URL publica HTTPS."
+    )
+}
 
 fun resolveAndroidSdkDir(): String? {
     val fromEnv = System.getenv("ANDROID_SDK_ROOT")
@@ -130,8 +151,10 @@ android {
     }
 }
 
-tasks.matching { it.name == "preDebugBuild" }.configureEach {
-    dependsOn(setupAdbReverse)
+if (isLocalBackendUrl) {
+    tasks.matching { it.name == "preDebugBuild" }.configureEach {
+        dependsOn(setupAdbReverse)
+    }
 }
 
 dependencies {

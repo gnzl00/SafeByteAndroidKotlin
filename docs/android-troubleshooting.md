@@ -18,7 +18,8 @@ Valor por defecto:
 - `http://127.0.0.1:5188/`
 
 Notas:
-- Si usas movil fisico por Android Studio, habilita tunel ADB:
+- `127.0.0.1` solo sirve para desarrollo local.
+- Si usas movil fisico por Android Studio y backend local, habilita tunel ADB:
 
 ```powershell
 adb reverse tcp:5188 tcp:5188
@@ -30,11 +31,13 @@ adb reverse tcp:5188 tcp:5188
 .\scripts\setup-adb-reverse.ps1
 ```
 
-- Para APK real fuera de Android Studio, usa backend publico:
+- Para APK/AAB real fuera de Android Studio, usa backend publico por HTTPS:
 
 ```properties
 SAFEBYTE_API_BASE_URL=https://tu-backend-publico/
 ```
+
+- Si intentas compilar `release` con localhost/127.0.0.1/10.0.2.2, Gradle mostrara error para evitar una build dependiente del PC.
 
 ## 5) Historial de IANutri no carga
 - Historial remoto solo aplica con cuenta real (no `guest@local`).

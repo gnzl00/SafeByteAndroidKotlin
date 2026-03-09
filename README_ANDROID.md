@@ -33,16 +33,18 @@ Aplicacion movil de SafeByte/Food DNA.
 3. Ejecutar en emulador o dispositivo.
 
 ## URL backend IANutri
-Por defecto se usa:
+La app usa `BuildConfig.SAFEBYTE_API_BASE_URL`.
+
+Si no defines nada, por defecto se usa:
 
 ```text
 http://127.0.0.1:5188/
 ```
 
 Notas:
+- `http://127.0.0.1:5188/` es solo para desarrollo local.
 - La app ya no permite cambiar la URL desde `Config`.
-- Se usa el backend MVC de SafeByte via `BuildConfig.SAFEBYTE_API_BASE_URL`.
-- En movil fisico conectado por Android Studio, usa `adb reverse`:
+- En movil fisico conectado por Android Studio y backend local, usa `adb reverse`:
 
 ```powershell
 adb reverse tcp:5188 tcp:5188
@@ -54,13 +56,18 @@ adb reverse tcp:5188 tcp:5188
 .\scripts\setup-adb-reverse.ps1
 ```
 
-- Para despliegue real, define una URL publica del backend en `gradle.properties`.
+- Para despliegue independiente (sin depender del ordenador), define URL publica HTTPS en `gradle.properties`.
 
 Tambien puedes fijar el valor por build en `gradle.properties`:
 
 ```properties
-SAFEBYTE_API_BASE_URL=http://TU_HOST_O_IP:PUERTO/
+SAFEBYTE_API_BASE_URL=https://TU_BACKEND_PUBLICO/
 ```
+
+Comportamiento de build:
+- `debug` + URL local -> intenta `adb reverse` automaticamente.
+- `debug` + URL publica -> no usa `adb reverse`.
+- `release` + URL local -> el build falla para evitar publicar una APK dependiente de localhost.
 
 ## Documentacion extra
 - Ver [docs/android-troubleshooting.md](docs/android-troubleshooting.md)
