@@ -1,5 +1,6 @@
 package com.safebyte
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -79,13 +80,13 @@ fun HomeScreen() {
                 if (twoColumns) {
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         TestimonialCard(
-                            imageResName = "mujer_celiaca",
+                            imageResId = R.drawable.mujer_celiaca,
                             title = "Lucia, 27 anos (celiaca)",
                             quote = "Ser celiaca no es solo evitar el pan. Comer fuera o elegir productos es una batalla constante. Food DNA me da seguridad.",
                             modifier = Modifier.weight(1f)
                         )
                         TestimonialCard(
-                            imageResName = "hombre_frutos_secos",
+                            imageResId = R.drawable.hombre_frutos_secos,
                             title = "Diego, 34 anos (alergico a frutos secos)",
                             quote = "Una reaccion alergica puede cambiarte el dia. Esta app me da tranquilidad y evita leer etiquetas durante minutos.",
                             modifier = Modifier.weight(1f)
@@ -94,12 +95,12 @@ fun HomeScreen() {
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         TestimonialCard(
-                            imageResName = "mujer_celiaca",
+                            imageResId = R.drawable.mujer_celiaca,
                             title = "Lucia, 27 anos (celiaca)",
                             quote = "Ser celiaca no es solo evitar el pan. Comer fuera o elegir productos es una batalla constante. Food DNA me da seguridad."
                         )
                         TestimonialCard(
-                            imageResName = "hombre_frutos_secos",
+                            imageResId = R.drawable.hombre_frutos_secos,
                             title = "Diego, 34 anos (alergico a frutos secos)",
                             quote = "Una reaccion alergica puede cambiarte el dia. Esta app me da tranquilidad y evita leer etiquetas durante minutos."
                         )
@@ -130,27 +131,24 @@ fun HomeScreen() {
 
 @Composable
 private fun TestimonialCard(
-    imageResName: String,
+    @DrawableRes imageResId: Int,
     title: String,
     quote: String,
     modifier: Modifier = Modifier
 ) {
-    val resId = drawableId(imageResName)
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F9F1)),
         shape = RoundedCornerShape(14.dp)
     ) {
         Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (resId != 0) {
-                Image(
-                    painter = painterResource(resId),
-                    contentDescription = title,
-                    modifier = Modifier
-                        .size(84.dp)
-                        .clip(CircleShape)
-                )
-            }
+            Image(
+                painter = painterResource(imageResId),
+                contentDescription = title,
+                modifier = Modifier
+                    .size(84.dp)
+                    .clip(CircleShape)
+            )
             Column(Modifier.weight(1f)) {
                 Text(title, color = Color(0xFF2A5934), fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))

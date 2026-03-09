@@ -10,11 +10,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            ProvideAppContext {
-                SafeByteTheme {
-                    Surface(color = MaterialTheme.colorScheme.background) {
-                        SafeByteApp()
-                    }
+            SafeByteTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    SafeByteApp()
                 }
             }
         }

@@ -1,4 +1,4 @@
-package com.safebyte
+﻿package com.safebyte
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -12,7 +12,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -70,6 +74,9 @@ private val IaSubtle = Color(0xFF4F5F55)
 private val IaSuccess = Color(0xFF1F6B39)
 private val IaWarning = Color(0xFF9A5A00)
 private val IaError = Color(0xFF973333)
+private val reformulationBlockedTokens = listOf("modelo", "gpt", "openai", "enfoque:", "notas:")
+private val leadingBulletRegex = Regex("^[-*\\u2022]\\s*")
+private val apiMessageRegex = Regex("\"message\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
 
 private fun modeLabel(mode: String): String = when (mode) {
     "rapido-basico" -> "Rapido y basico"
@@ -95,24 +102,12 @@ private fun statusColor(kind: StatusKind): Color = when (kind) {
     StatusKind.ERROR -> IaError
 }
 
-private fun sanitizeReformulation(text: String): String {
-    val blocked = listOf("modelo", "gpt", "openai", "enfoque:", "notas:")
-    return text.replace("\r", "\n")
-        .split('\n')
-        .map { it.trim().trimStart('-', '*', '•').trim() }
-        .filter { it.isNotBlank() }
-        .filter { line -> blocked.none { line.lowercase().contains(it) } }
-        .joinToString(" ")
-        .trim()
-}
-
 private fun sanitizeReformulationSafe(text: String): String {
-    val blocked = listOf("modelo", "gpt", "openai", "enfoque:", "notas:")
     return text.replace("\r", "\n")
         .split('\n')
-        .map { line -> line.trim().replace(Regex("^[-*\\u2022]\\s*"), "").trim() }
+        .map { line -> line.trim().replace(leadingBulletRegex, "").trim() }
         .filter { it.isNotBlank() }
-        .filter { line -> blocked.none { token -> line.lowercase().contains(token) } }
+        .filter { line -> reformulationBlockedTokens.none { token -> line.lowercase().contains(token) } }
         .joinToString(" ")
         .trim()
 }
@@ -166,8 +161,7 @@ private fun Throwable.toApiMessage(apiBaseUrl: String): String {
 
 private fun extractApiErrorMessage(body: String): String {
     if (body.isBlank()) return ""
-    val regex = Regex("\"message\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE)
-    val match = regex.find(body)?.groupValues?.getOrNull(1)?.trim()
+    val match = apiMessageRegex.find(body)?.groupValues?.getOrNull(1)?.trim()
     if (!match.isNullOrBlank()) return match
     return body.trim().replace("\n", " ").take(220)
 }
@@ -344,6 +338,7 @@ fun IANutriScreen(
     }
 
     suspend fun openAssistant(recipe: IANutriRecipeSuggestion) {
+        val allergensSummary = normalizedAllergens.joinToString().ifBlank { "sin alergenos configurados" }
         showAssistant = true
         assistantIntro = "Preparando guia para ${recipe.title}..."
         assistantItems = emptyList()
@@ -367,7 +362,7 @@ fun IANutriScreen(
             assistantSteps = response.stepByStep.normalizeTextList(16, recipe.steps)
             assistantSafety = response.safetyNotes.normalizeTextList(
                 10,
-                listOf("Evita contaminacion cruzada con: ${normalizedAllergens.joinToString().ifBlank { "sin alergenos configurados" }}.")
+                listOf("Evita contaminacion cruzada con: $allergensSummary.")
             )
             assistantStatus = UiStatus("Guia lista. Puedes cocinar paso a paso.", StatusKind.SUCCESS)
         } catch (t: Throwable) {
@@ -375,7 +370,7 @@ fun IANutriScreen(
             assistantItems = recipe.ingredients.normalizeTextList(14)
             assistantSteps = recipe.steps.normalizeTextList(16)
             assistantSafety = listOf(
-                "Confirma etiquetas y evita trazas de: ${normalizedAllergens.joinToString().ifBlank { "sin alergenos configurados" }}."
+                "Confirma etiquetas y evita trazas de: $allergensSummary."
             )
             assistantStatus = UiStatus("No se pudo generar guia IA: ${t.toApiMessage(apiBaseUrl)}", StatusKind.ERROR)
         } finally {
@@ -563,22 +558,34 @@ fun IANutriScreen(
                     }
                     warnings.forEach { Text("Aviso: $it", color = IaWarning) }
                     substitutions.forEach { Text("Sustitucion sugerida: $it", color = IaSuccess) }
-                    suggestions.forEachIndexed { idx, recipe ->
-                        Card(
+                    if (suggestions.isNotEmpty()) {
+                        LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { scope.launch { openAssistant(recipe) } },
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFCFEFD)),
-                            border = BorderStroke(1.dp, Color(0xFFD4DFD5)),
-                            shape = RoundedCornerShape(14.dp)
+                                .heightIn(max = 440.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("${idx + 1}. ${recipe.title}", color = IaPrimary, fontWeight = FontWeight.SemiBold)
-                                Text("Tiempo: ${recipe.estimatedTime} | Dificultad: ${recipe.difficulty}", color = Color(0xFF45624F))
-                                Text(recipe.description, color = IaSubtle)
-                                Text("Ingredientes: ${recipe.ingredients.take(8).joinToString()}", color = IaSubtle)
-                                Text("Pasos clave: ${recipe.steps.take(3).joinToString(" | ")}", color = IaSubtle)
-                                if (recipe.allergyWarning.isNotBlank()) Text(recipe.allergyWarning, color = IaWarning)
+                            itemsIndexed(
+                                items = suggestions,
+                                key = { idx, recipe -> "${recipe.title}-${recipe.estimatedTime}-$idx" }
+                            ) { idx, recipe ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { scope.launch { openAssistant(recipe) } },
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFCFEFD)),
+                                    border = BorderStroke(1.dp, Color(0xFFD4DFD5)),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("${idx + 1}. ${recipe.title}", color = IaPrimary, fontWeight = FontWeight.SemiBold)
+                                        Text("Tiempo: ${recipe.estimatedTime} | Dificultad: ${recipe.difficulty}", color = Color(0xFF45624F))
+                                        Text(recipe.description, color = IaSubtle)
+                                        Text("Ingredientes: ${recipe.ingredients.take(8).joinToString()}", color = IaSubtle)
+                                        Text("Pasos clave: ${recipe.steps.take(3).joinToString(" | ")}", color = IaSubtle)
+                                        if (recipe.allergyWarning.isNotBlank()) Text(recipe.allergyWarning, color = IaWarning)
+                                    }
+                                }
                             }
                         }
                     }
@@ -677,20 +684,30 @@ fun IANutriScreen(
                         } else if (history.isEmpty()) {
                             Text("Aun no hay conversaciones guardadas.", color = IaSubtle)
                         } else {
-                            history.forEach { item ->
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { restoreHistoryItem(item) },
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFDFEFE)),
-                                    border = BorderStroke(1.dp, Color(0xFFD5DFD7)),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(if (item.option.isNotBlank()) "Modo: ${item.option}" else "Conversacion", color = IaPrimary, fontWeight = FontWeight.SemiBold)
-                                        Text("Pedido: ${item.userInput.ifBlank { "Sin texto" }}", color = IaSubtle)
-                                        Text("Resumen: ${item.summary.ifBlank { "Sin resumen" }}", color = IaSubtle)
-                                        Text("${formatHistoryDate(item.createdAtUtc)} - ${item.suggestions.size} sugerencia(s)", color = Color(0xFF45624F))
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 360.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(
+                                    items = history,
+                                    key = { item -> item.id.ifBlank { "${item.createdAtUtc}-${item.option}-${item.userInput.take(24)}" } }
+                                ) { item ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { restoreHistoryItem(item) },
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFDFEFE)),
+                                        border = BorderStroke(1.dp, Color(0xFFD5DFD7)),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(if (item.option.isNotBlank()) "Modo: ${item.option}" else "Conversacion", color = IaPrimary, fontWeight = FontWeight.SemiBold)
+                                            Text("Pedido: ${item.userInput.ifBlank { "Sin texto" }}", color = IaSubtle)
+                                            Text("Resumen: ${item.summary.ifBlank { "Sin resumen" }}", color = IaSubtle)
+                                            Text("${formatHistoryDate(item.createdAtUtc)} - ${item.suggestions.size} sugerencia(s)", color = Color(0xFF45624F))
+                                        }
                                     }
                                 }
                             }
@@ -702,3 +719,4 @@ fun IANutriScreen(
         }
     }
 }
+

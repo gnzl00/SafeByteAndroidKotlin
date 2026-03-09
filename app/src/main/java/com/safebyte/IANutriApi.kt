@@ -1,4 +1,4 @@
-package com.safebyte
+﻿package com.safebyte
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.SerialName
@@ -155,7 +155,9 @@ object IANutriNetwork {
     private val cache = ConcurrentHashMap<String, IANutriApi>()
 
     private val client: OkHttpClient by lazy {
-        val logger = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
+        val logger = HttpLoggingInterceptor().apply {
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
+        }
         OkHttpClient.Builder()
             .addInterceptor(logger)
             .readTimeout(40, TimeUnit.SECONDS)
@@ -191,3 +193,4 @@ object IANutriNetwork {
         return if (finalBase.endsWith("/")) finalBase else "$finalBase/"
     }
 }
+

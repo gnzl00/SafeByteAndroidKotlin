@@ -1,5 +1,6 @@
 package com.safebyte
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,7 +44,7 @@ import androidx.compose.ui.unit.dp
 
 data class FoodItem(
     val name: String,
-    val imageResName: String,
+    @DrawableRes val imageResId: Int,
     val ingredients: String,
     val recipe: String,
     val allergens: List<String>
@@ -55,12 +56,18 @@ fun MealsScreen(prefs: UserPrefs) {
     val meals = remember { MealsData.meals }
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<FoodItem?>(null) }
+    val normalizedUserAllergens = remember(selectedAllergens) { normalizeAllergenSet(selectedAllergens) }
+    val normalizedUserKeys = remember(normalizedUserAllergens) {
+        normalizedUserAllergens.mapTo(linkedSetOf(), ::allergenKey)
+    }
+    val normalizedQuery = remember(query) { query.trim().lowercase() }
 
-    val filteredMeals = remember(query, selectedAllergens) {
-        val normalizedUserAllergens = normalizeAllergenSet(selectedAllergens)
+    val filteredMeals = remember(normalizedQuery, normalizedUserKeys) {
         meals.asSequence()
-            .filter { it.name.contains(query, ignoreCase = true) }
-            .filter { item -> !hasAllergenConflict(item.allergens, normalizedUserAllergens) }
+            .filter { item ->
+                normalizedQuery.isEmpty() || item.name.lowercase().contains(normalizedQuery)
+            }
+            .filter { item -> !hasAllergenConflictWithKeys(item.allergens, normalizedUserKeys) }
             .toList()
     }
 
@@ -145,7 +152,6 @@ fun MealsScreen(prefs: UserPrefs) {
 
 @Composable
 private fun MealCard(item: FoodItem, onClick: () -> Unit) {
-    val resId = drawableId(item.imageResName)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -155,16 +161,14 @@ private fun MealCard(item: FoodItem, onClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (resId != 0) {
-                Image(
-                    painter = painterResource(resId),
-                    contentDescription = item.name,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(160.dp),
-                    contentScale = ContentScale.Crop
-                )
-            }
+            Image(
+                painter = painterResource(item.imageResId),
+                contentDescription = item.name,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                contentScale = ContentScale.Crop
+            )
             Text(
                 text = item.name,
                 color = Color(0xFF1E5631),
@@ -190,17 +194,14 @@ private fun MealModal(
         title = { Text(item.name, color = Color(0xFF1E5631), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val resId = drawableId(item.imageResName)
-                if (resId != 0) {
-                    Image(
-                        painter = painterResource(resId),
-                        contentDescription = item.name,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        contentScale = ContentScale.Crop
-                    )
-                }
+                Image(
+                    painter = painterResource(item.imageResId),
+                    contentDescription = item.name,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    contentScale = ContentScale.Crop
+                )
                 Text("Ingredientes: ${item.ingredients}")
                 Text("Receta: ${item.recipe}")
                 Text("Alergenos: ${if (item.allergens.isEmpty()) "Ninguno" else item.allergens.joinToString()}")

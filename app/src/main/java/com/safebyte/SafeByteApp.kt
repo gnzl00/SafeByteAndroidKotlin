@@ -83,7 +83,7 @@ fun SafeByteApp() {
         return
     }
 
-    val items = listOf(Dest.Home, Dest.Meals, Dest.IANutri, Dest.Scanner, Dest.Settings, Dest.Contact)
+    val items = remember { listOf(Dest.Home, Dest.Meals, Dest.IANutri, Dest.Scanner, Dest.Settings, Dest.Contact) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val currentTitle = when (currentRoute) {
@@ -142,7 +142,7 @@ fun SafeByteApp() {
                     apiBaseUrl = BuildConfig.SAFEBYTE_API_BASE_URL
                 )
             }
-            composable(Dest.Scanner.route) { ScannerScreen(prefs = prefs, userAllergens = userAllergens) }
+            composable(Dest.Scanner.route) { ScannerScreen(userAllergens = userAllergens) }
             composable(Dest.Settings.route) {
                 SettingsScreen(
                     emailLower = loggedEmail,

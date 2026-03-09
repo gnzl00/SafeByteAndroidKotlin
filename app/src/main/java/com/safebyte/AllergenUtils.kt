@@ -11,6 +11,10 @@ val defaultAllergenCatalog = listOf(
     "Soja"
 )
 
+private val combiningMarksRegex = Regex("\\p{Mn}+")
+private val nonAlnumSpaceRegex = Regex("[^a-z0-9\\s]")
+private val multiSpaceRegex = Regex("\\s+")
+
 fun canonicalizeAllergen(raw: String): String? {
     val value = raw.trim()
     if (value.isEmpty()) {
@@ -54,8 +58,14 @@ fun normalizeAllergenSet(values: Iterable<String>): Set<String> {
 }
 
 fun hasAllergenConflict(itemAllergens: Iterable<String>, userAllergens: Set<String>): Boolean {
-    val userKeys = userAllergens.map { allergenKey(it) }.toSet()
-    return itemAllergens.any { allergenKey(it) in userKeys }
+    if (userAllergens.isEmpty()) return false
+    val userKeys = userAllergens.mapTo(linkedSetOf(), ::allergenKey)
+    return hasAllergenConflictWithKeys(itemAllergens, userKeys)
+}
+
+fun hasAllergenConflictWithKeys(itemAllergens: Iterable<String>, userAllergenKeys: Set<String>): Boolean {
+    if (userAllergenKeys.isEmpty()) return false
+    return itemAllergens.any { allergenKey(it) in userAllergenKeys }
 }
 
 private fun normalizeAllergenToken(raw: String): String {
@@ -73,9 +83,9 @@ private fun normalizeAllergenToken(raw: String): String {
         .replace("ú", "u")
         .replace("ñ", "n")
     val noAccents = Normalizer.normalize(fixed.lowercase(), Normalizer.Form.NFD)
-        .replace("\\p{Mn}+".toRegex(), "")
+        .replace(combiningMarksRegex, "")
     return noAccents
-        .replace("[^a-z0-9\\s]".toRegex(), " ")
-        .replace("\\s+".toRegex(), " ")
+        .replace(nonAlnumSpaceRegex, " ")
+        .replace(multiSpaceRegex, " ")
         .trim()
 }

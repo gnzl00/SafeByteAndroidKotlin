@@ -3,6 +3,7 @@ package com.safebyte
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -36,10 +37,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -60,15 +63,27 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
+import java.io.IOException
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 @Composable
 fun ScannerScreen(
-    prefs: UserPrefs,
     userAllergens: Set<String>
 ) {
+    val logTag = "ScannerScreen"
     val ctx = LocalContext.current
 
     var hasCameraPermission by remember {
@@ -89,6 +104,110 @@ fun ScannerScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var product by remember { mutableStateOf<Product?>(null) }
     var scanResetToken by remember { mutableStateOf(0) }
+    var activeRequestToken by remember { mutableStateOf(0) }
+    var activeRequestJob by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+    val userOff = remember(userAllergens) { mapUserAllergensToOff(userAllergens) }
+
+    fun startLookup(rawValue: String) {
+        val normalized = normalizeBarcode(rawValue)
+        if (!isLikelyBarcode(normalized)) {
+            error = "Codigo de barras invalido. Debe tener entre 8 y 14 digitos."
+            return
+        }
+
+        activeRequestJob?.cancel()
+        activeRequestToken += 1
+        val requestToken = activeRequestToken
+        loading = true
+        error = null
+        product = null
+        manualBarcode = normalized
+        barcode = normalized
+
+        activeRequestJob = scope.launch {
+            try {
+                val result = withTimeout(SCANNER_LOOKUP_TIMEOUT_MS) {
+                    OpenFoodFacts.lookupProduct(normalized)
+                }
+
+                if (requestToken != activeRequestToken) return@launch
+                when (result) {
+                    is OpenFoodFactsLookupResult.Found -> {
+                        product = result.product
+                    }
+
+                    OpenFoodFactsLookupResult.NotFound -> {
+                        error = "Producto no encontrado."
+                    }
+
+                    is OpenFoodFactsLookupResult.NetworkError -> {
+                        Log.w(
+                            logTag,
+                            "OpenFoodFacts IO para barcode=$normalized: ${rootCause(result.error).javaClass.simpleName}",
+                            result.error
+                        )
+                        error = networkIssueMessage(result.error)
+                    }
+
+                    is OpenFoodFactsLookupResult.HttpError -> {
+                        Log.w(logTag, "OpenFoodFacts HTTP ${result.code} para barcode=$normalized")
+                        error = when (result.code) {
+                            404 -> "Producto no encontrado."
+                            429 -> "Demasiadas consultas seguidas. Espera unos segundos."
+                            in 500..599 -> "Open Food Facts no responde ahora mismo. Intentalo de nuevo."
+                            else -> "No se pudo consultar el producto (HTTP ${result.code})."
+                        }
+                    }
+
+                    is OpenFoodFactsLookupResult.UnknownError -> {
+                        Log.e(
+                            logTag,
+                            "Fallo inesperado consultando OpenFoodFacts para barcode=$normalized",
+                            result.error
+                        )
+                        error = "No se pudo consultar el producto en este momento."
+                    }
+                }
+            } catch (_: TimeoutCancellationException) {
+                if (requestToken == activeRequestToken) {
+                    error = "La consulta ha tardado demasiado. Intentalo de nuevo."
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (requestToken == activeRequestToken) {
+                    Log.e(logTag, "Fallo inesperado consultando OpenFoodFacts para barcode=$normalized", e)
+                    error = if (e is IOException) {
+                        networkIssueMessage(e)
+                    } else {
+                        "No se pudo consultar el producto en este momento."
+                    }
+                }
+            } finally {
+                if (requestToken == activeRequestToken) {
+                    loading = false
+                }
+            }
+        }
+    }
+
+    fun clearScannerState() {
+        activeRequestJob?.cancel()
+        activeRequestToken += 1
+        barcode = null
+        product = null
+        error = null
+        loading = false
+        manualBarcode = ""
+        scanResetToken += 1
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            activeRequestJob?.cancel()
+        }
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -140,8 +259,10 @@ fun ScannerScreen(
                         resetToken = scanResetToken,
                         onBarcode = { value ->
                             if (product == null && !loading) {
-                                barcode = value
-                                manualBarcode = value
+                                val normalized = normalizeBarcode(value)
+                                if (isLikelyBarcode(normalized) && normalized != barcode) {
+                                    startLookup(normalized)
+                                }
                             }
                         }
                     )
@@ -177,24 +298,14 @@ fun ScannerScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
-                            val b = manualBarcode.trim()
-                            if (b.isBlank()) {
-                                error = "Introduce un codigo de barras."
-                            } else {
-                                barcode = b
-                            }
+                            startLookup(manualBarcode)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Buscar producto") }
 
                     OutlinedButton(
                         onClick = {
-                            barcode = null
-                            product = null
-                            error = null
-                            loading = false
-                            manualBarcode = ""
-                            scanResetToken += 1
+                            clearScannerState()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Limpiar") }
@@ -207,45 +318,15 @@ fun ScannerScreen(
                 ) {
                     Button(
                         onClick = {
-                            val b = manualBarcode.trim()
-                            if (b.isBlank()) {
-                                error = "Introduce un codigo de barras."
-                            } else {
-                                barcode = b
-                            }
+                            startLookup(manualBarcode)
                         }
                     ) { Text("Buscar producto") }
 
                     OutlinedButton(
                         onClick = {
-                            barcode = null
-                            product = null
-                            error = null
-                            loading = false
-                            manualBarcode = ""
-                            scanResetToken += 1
+                            clearScannerState()
                         }
                     ) { Text("Limpiar") }
-                }
-            }
-
-            LaunchedEffect(barcode) {
-                val b = barcode ?: return@LaunchedEffect
-                loading = true
-                error = null
-                product = null
-
-                try {
-                    val resp = OpenFoodFacts.api.getProduct(b)
-                    if (resp.status == 1 && resp.product != null) {
-                        product = resp.product
-                    } else {
-                        error = "Producto no encontrado."
-                    }
-                } catch (_: Throwable) {
-                    error = "No se pudo consultar el producto en este momento."
-                } finally {
-                    loading = false
                 }
             }
 
@@ -268,9 +349,10 @@ fun ScannerScreen(
             product?.let { p ->
                 Spacer(Modifier.height(8.dp))
 
-                val userOff = mapUserAllergensToOff(userAllergens)
-                val productAllergens = extractOffAllergens(null, p.allergens)
-                val conflicts = productAllergens.intersect(userOff)
+                val productAllergens = remember(p.allergensTags, p.allergens) {
+                    extractOffAllergens(p.allergensTags, p.allergens)
+                }
+                val conflicts = remember(productAllergens, userOff) { productAllergens.intersect(userOff) }
 
                 val nutr = p.nutriments
                 val kcal100g = nutrToText(nutr?.get("energy-kcal_100g"))
@@ -365,8 +447,8 @@ private fun ProductCard(
     salt100g: String?
 ) {
     val allergenText = product.allergens ?: "No especificado"
-    val detectedInSpanish = translateOffAllergensToSpanish(productAllergens)
-    val conflictsInSpanish = translateOffAllergensToSpanish(conflicts)
+    val detectedInSpanish = remember(productAllergens) { translateOffAllergensToSpanish(productAllergens) }
+    val conflictsInSpanish = remember(conflicts) { translateOffAllergensToSpanish(conflicts) }
 
     Card {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -430,25 +512,41 @@ private fun ProductCard(
     }
 }
 
-private fun mapUserAllergensToOff(user: Set<String>): Set<String> =
-    user.flatMap { a ->
-        when (a.trim().lowercase()) {
-            "lacteos", "leche" -> listOf("milk")
-            "gluten" -> listOf("gluten")
-            "huevo", "huevos" -> listOf("eggs")
-            "soja" -> listOf("soybeans", "soy")
-            "cacahuetes", "mani" -> listOf("peanuts")
-            "frutos secos" -> listOf("nuts")
-            "pescado" -> listOf("fish")
-            "marisco", "crustaceos" -> listOf("crustaceans", "shellfish")
-            "sesamo" -> listOf("sesame-seeds", "sesame")
-            "mostaza" -> listOf("mustard")
-            "apio" -> listOf("celery")
-            "moluscos" -> listOf("molluscs")
-            "sulfitos", "sulfites" -> listOf("sulphur-dioxide-and-sulphites", "sulphites")
-            else -> listOf(a.trim().lowercase())
+private fun mapUserAllergensToOff(user: Set<String>): Set<String> {
+    if (user.isEmpty()) return emptySet()
+    val result = linkedSetOf<String>()
+    user.forEach { raw ->
+        when (raw.trim().lowercase()) {
+            "lacteos", "leche" -> result += "milk"
+            "gluten" -> result += "gluten"
+            "huevo", "huevos" -> result += "eggs"
+            "soja" -> {
+                result += "soybeans"
+                result += "soy"
+            }
+            "cacahuetes", "mani" -> result += "peanuts"
+            "frutos secos" -> result += "nuts"
+            "pescado" -> result += "fish"
+            "marisco", "crustaceos" -> {
+                result += "crustaceans"
+                result += "shellfish"
+            }
+            "sesamo" -> {
+                result += "sesame-seeds"
+                result += "sesame"
+            }
+            "mostaza" -> result += "mustard"
+            "apio" -> result += "celery"
+            "moluscos" -> result += "molluscs"
+            "sulfitos", "sulfites" -> {
+                result += "sulphur-dioxide-and-sulphites"
+                result += "sulphites"
+            }
+            else -> result += raw.trim().lowercase()
         }
-    }.toSet()
+    }
+    return result
+}
 
 private fun extractOffAllergens(tags: List<String>?, raw: String?): Set<String> {
     val fromTags = tags.orEmpty()
@@ -472,12 +570,13 @@ private fun extractOffAllergens(tags: List<String>?, raw: String?): Set<String> 
 }
 
 private fun translateOffAllergensToSpanish(values: Set<String>): List<String> {
-    return values
-        .map { offAllergenToSpanish(it) }
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .toSet()
-        .sorted()
+    if (values.isEmpty()) return emptyList()
+    val translated = sortedSetOf<String>()
+    values.forEach { value ->
+        val clean = offAllergenToSpanish(value).trim()
+        if (clean.isNotEmpty()) translated += clean
+    }
+    return translated.toList()
 }
 
 private fun offAllergenToSpanish(value: String): String {
@@ -516,76 +615,100 @@ private fun CameraBarcodePreview(
     resetToken: Int,
     onBarcode: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val previewView = remember {
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
     var lastValue by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(resetToken) {
         lastValue = null
     }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            val previewView = PreviewView(context).apply {
-                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                scaleType = PreviewView.ScaleType.FILL_CENTER
+    DisposableEffect(lifecycleOwner, previewView) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        val options = BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(
+                Barcode.FORMAT_EAN_13,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_UPC_A,
+                Barcode.FORMAT_UPC_E,
+                Barcode.FORMAT_CODE_128
+            )
+            .build()
+        val scanner = BarcodeScanning.getClient(options)
+        val executor: ExecutorService = Executors.newSingleThreadExecutor()
+
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
             }
 
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
+            analysis.setAnalyzer(executor) { imageProxy ->
+                val mediaImage = imageProxy.image
+                if (mediaImage == null) {
+                    imageProxy.close()
+                    return@setAnalyzer
                 }
 
-                val options = BarcodeScannerOptions.Builder()
-                    .setBarcodeFormats(
-                        Barcode.FORMAT_EAN_13,
-                        Barcode.FORMAT_EAN_8,
-                        Barcode.FORMAT_UPC_A,
-                        Barcode.FORMAT_UPC_E,
-                        Barcode.FORMAT_CODE_128
-                    )
-                    .build()
-                val scanner = BarcodeScanning.getClient(options)
-                val executor = Executors.newSingleThreadExecutor()
-
-                val analysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-
-                analysis.setAnalyzer(executor) { imageProxy ->
-                    val mediaImage = imageProxy.image
-                    if (mediaImage != null) {
-                        val image = InputImage.fromMediaImage(
-                            mediaImage,
-                            imageProxy.imageInfo.rotationDegrees
-                        )
-                        scanner.process(image)
-                            .addOnSuccessListener { barcodes ->
-                                val value = barcodes.firstOrNull()?.rawValue
-                                if (!value.isNullOrBlank() && value != lastValue) {
-                                    lastValue = value
-                                    onBarcode(value)
-                                }
-                            }
-                            .addOnCompleteListener { imageProxy.close() }
-                    } else {
-                        imageProxy.close()
+                val image = InputImage.fromMediaImage(
+                    mediaImage,
+                    imageProxy.imageInfo.rotationDegrees
+                )
+                scanner.process(image)
+                    .addOnSuccessListener { barcodes ->
+                        val value = barcodes.firstOrNull()?.rawValue
+                        if (!value.isNullOrBlank() && value != lastValue) {
+                            lastValue = value
+                            onBarcode(value)
+                        }
                     }
-                }
+                    .addOnCompleteListener { imageProxy.close() }
+            }
 
-                val selector = CameraSelector.DEFAULT_BACK_CAMERA
-                try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, analysis)
-                } catch (_: Throwable) {
-                    // ignore
-                }
-            }, ContextCompat.getMainExecutor(context))
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis
+                )
+            } catch (_: Throwable) {
+                // ignore
+            }
+        }, ContextCompat.getMainExecutor(context))
 
-            previewView
+        onDispose {
+            try {
+                if (cameraProviderFuture.isDone) {
+                    cameraProviderFuture.get().unbindAll()
+                }
+            } catch (_: Throwable) {
+                // ignore
+            }
+            try {
+                scanner.close()
+            } catch (_: Throwable) {
+                // ignore
+            }
+            executor.shutdown()
         }
+    }
+
+    AndroidView(
+        modifier = modifier,
+        factory = { previewView }
     )
 }
 
@@ -597,3 +720,30 @@ private fun nutrToText(v: JsonElement?): String? {
         v.toString().trim('"')
     }
 }
+
+private fun normalizeBarcode(rawValue: String): String =
+    rawValue.trim().filter { it.isDigit() }
+
+private fun isLikelyBarcode(value: String): Boolean =
+    value.length in 8..14
+
+private fun networkIssueMessage(error: IOException): String {
+    val root = rootCause(error)
+    return when (root) {
+        is UnknownHostException -> "No se pudo resolver el servidor de Open Food Facts (DNS)."
+        is SocketTimeoutException -> "El servidor tarda demasiado en responder. Intentalo de nuevo."
+        is SSLHandshakeException, is SSLException -> "Fallo de seguridad TLS al conectar con Open Food Facts."
+        is ConnectException -> "No se pudo abrir conexion con Open Food Facts."
+        else -> "Fallo de red con Open Food Facts (${root.javaClass.simpleName})."
+    }
+}
+
+private fun rootCause(t: Throwable): Throwable {
+    var current: Throwable = t
+    while (current.cause != null && current.cause !== current) {
+        current = current.cause!!
+    }
+    return current
+}
+
+private const val SCANNER_LOOKUP_TIMEOUT_MS = 15_000L
