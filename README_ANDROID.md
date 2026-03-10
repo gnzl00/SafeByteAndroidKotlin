@@ -71,3 +71,4 @@ Comportamiento de build:
 
 ## Documentacion extra
 - Ver [docs/android-troubleshooting.md](docs/android-troubleshooting.md)
+- Ver documentacion tecnica integral: [docs/documentacion-completa-safebyte-android.md](docs/documentacion-completa-safebyte-android.md)
