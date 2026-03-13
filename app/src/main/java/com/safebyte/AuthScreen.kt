@@ -1,5 +1,6 @@
 package com.safebyte
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,8 +39,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.safebyte.auth.PasswordHasher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -155,8 +158,8 @@ fun AuthScreen(
                                         }
                                         onLogin(emailLower)
                                     }
-                                } catch (_: Throwable) {
-                                    error = "Error de conexion."
+                                } catch (t: Throwable) {
+                                    error = mapAuthErrorToMessage(t)
                                 } finally {
                                     loading = false
                                 }
@@ -246,8 +249,8 @@ fun AuthScreen(
                                         }
                                         onLogin(emailLower)
                                     }
-                                } catch (_: Throwable) {
-                                    error = "Error de conexion."
+                                } catch (t: Throwable) {
+                                    error = mapAuthErrorToMessage(t)
                                 } finally {
                                     loading = false
                                 }
@@ -259,6 +262,35 @@ fun AuthScreen(
                 }
             }
         }
+    }
+}
+
+private fun mapAuthErrorToMessage(t: Throwable): String {
+    Log.e("AuthScreen", "Fallo en login/signup", t)
+    return when (t) {
+        is FirebaseNetworkException ->
+            "No se pudo conectar con Firebase. Revisa tu red y vuelve a intentar."
+
+        is FirebaseFirestoreException -> when (t.code) {
+            FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                "Firebase rechazo el acceso (PERMISSION_DENIED). Revisa reglas de Firestore."
+
+            FirebaseFirestoreException.Code.UNAUTHENTICATED ->
+                "Firestore requiere autenticacion de Firebase Auth para esta operacion."
+
+            FirebaseFirestoreException.Code.FAILED_PRECONDITION ->
+                "Firestore no parece configurado para este proyecto Firebase."
+
+            FirebaseFirestoreException.Code.UNAVAILABLE,
+            FirebaseFirestoreException.Code.DEADLINE_EXCEEDED ->
+                "Firebase no esta disponible temporalmente. Intenta de nuevo en unos segundos."
+
+            else ->
+                "Error de Firebase (${t.code})."
+        }
+
+        else ->
+            t.message?.takeIf { it.isNotBlank() } ?: "Error inesperado al iniciar sesion."
     }
 }
 
